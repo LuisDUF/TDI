@@ -96,7 +96,7 @@ while True:
             # Dibujar la caja y puntos clave en el frame original
             frame_h, frame_w, _ = frame.shape
             scale_x, scale_y = frame_w / INPUT_WIDTH, frame_h / INPUT_HEIGHT
-            cv2.rectangle(frame, (int(x1*scale_x), int(y1*scale_y)), (int(x2*scale_x), int(y2*scale_y)), (0, 255, 0), 2)
+            #cv2.rectangle(frame, (int(x1*scale_x), int(y1*scale_y)), (int(x2*scale_x), int(y2*scale_y)), (0, 255, 0), 2)
 
     if not person_detected:
         keypoints_buffer.clear() # Limpiar buffer si se pierde la persona
