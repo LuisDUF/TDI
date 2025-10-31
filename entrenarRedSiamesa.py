@@ -15,7 +15,7 @@ LSTM_HIDDEN_DIM = 256 # Dimensión oculta del LSTM
 NUM_LSTM_LAYERS = 2   # Número de capas LSTM
 LEARNING_RATE = 0.0001
 BATCH_SIZE = 16
-EPOCHS = 50
+EPOCHS = 150
 # -----------------------------------
 
 # Determinar el dispositivo

@@ -1,8 +1,8 @@
 from ultralytics import YOLO
 
 # --- CONFIGURACIÓN ---
-MODEL_TO_EXPORT = './yolov8n-pose.pt'
-EXPORT_NAME = './yolov8n-pose.onnx'
+MODEL_TO_EXPORT = './yolo11m-pose.pt'
+EXPORT_NAME = './yolo11m-pose.onnx'
 # ---------------------
 
 print(f"Cargando el modelo de pose '{MODEL_TO_EXPORT}'...")

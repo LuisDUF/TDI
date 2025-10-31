@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import torch
 import pickle
-from scipy.spatial.distance import euclidean
+from scipy.spatial.distance import euclidean, cosine, minkowski, chebyshev, mahalanobis, braycurtis
 import onnxruntime as ort
 from collections import deque
 
@@ -11,7 +11,7 @@ from entrenarRedSiamesa import SiameseLSTM, EMBEDDING_DIM, LSTM_HIDDEN_DIM, NUM_
 
 # --- --- --- CONFIGURACIÓN Y CONSTANTES --- --- ---
 # Modelo de Pose (ONNX)
-ONNX_MODEL_PATH = './yolov8n-pose.onnx'
+ONNX_MODEL_PATH = './yolo11m-pose.onnx'
 # Modelo de Re-ID (PyTorch)
 SIAMESE_MODEL_PATH = './best_siamese_model.pth'
 # Base de datos de embeddings
@@ -19,7 +19,7 @@ DATABASE_PATH = './reference_embeddings.pkl'
 
 # Parámetros de la aplicación
 SEQUENCE_LENGTH = 15  # Número de fotogramas para acumular antes de la inferencia. ¡Debe ser manejable!
-REID_THRESHOLD = 0.8  # Umbral de distancia. ¡Necesitarás ajustarlo!
+REID_THRESHOLD = 10  # Umbral de distancia. ¡Necesitarás ajustarlo!
 
 # Dimensiones de entrada para el modelo ONNX (de YOLOv8)
 INPUT_WIDTH = 640
@@ -48,8 +48,7 @@ keypoints_buffer = deque(maxlen=SEQUENCE_LENGTH)
 current_label = "Procesando..."
 
 # Iniciar captura de video
-cap = cv2.VideoCapture(0)
-
+cap = cv2.VideoCapture(".//dataset//train//luis//luis1.mp4")
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -110,7 +109,7 @@ while True:
             live_embedding = siamese_model(sequence_tensor).cpu().numpy().squeeze()
 
         # f. Calcular distancias y encontrar el más cercano
-        distances = [euclidean(live_embedding, ref_emb) for ref_emb in reference_embeddings]
+        distances = [braycurtis(live_embedding, ref_emb) for ref_emb in reference_embeddings]
         min_dist_idx = np.argmin(distances)
         min_dist = distances[min_dist_idx]
         
