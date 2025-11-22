@@ -11,6 +11,16 @@ ONNX_MODEL_PATH = './yolo11m-pose.onnx'
 # Dimensiones de entrada para el modelo ONNX (de YOLOv8)
 INPUT_WIDTH = 640
 INPUT_HEIGHT = 640
+
+# Índices de keypoints del cuerpo (COCO: quitamos 0–4 que son cara: nariz, ojos, orejas)
+# 0: Nose
+# 1: Left Eye
+# 2: Right Eye
+# 3: Left Ear
+# 4: Right Ear
+# 5–16: hombros, codos, muñecas, caderas, rodillas, tobillos
+BODY_KPT_INDICES = list(range(5, 17))   # 12 keypoints de cuerpo
+NUM_BODY_KPTS = len(BODY_KPT_INDICES)
 # --- --- ------------------- --- --- ---
 
 def preprocess_frame(frame):
@@ -24,7 +34,7 @@ def preprocess_frame(frame):
     return img_tensor
 
 def postprocess_output(output, frame_shape):
-    """Extrae los puntos clave de la salida del modelo ONNX."""
+    """Extrae los puntos clave de la salida del modelo ONNX (solo cuerpo, sin cara)."""
     # La salida de YOLO-Pose es [1, 56, N] -> la transponemos
     predictions = output[0][0].T
     
@@ -39,16 +49,19 @@ def postprocess_output(output, frame_shape):
     # Tomar la detección con la confianza más alta
     best_detection = predictions[np.argmax(predictions[:, 4])]
     
-    # Extraer puntos clave (17 kpts * 3 (x, y, conf))
+    # Extraer puntos clave completos (17 kpts * 3 (x, y, conf))
     keypoints_raw = best_detection[5:].reshape((17, 3))
+
+    # 🔹 NUEVO: quedarnos solo con keypoints de cuerpo (indices 5–16 en COCO)
+    body_kpts_raw = keypoints_raw[BODY_KPT_INDICES]   # forma (12, 3)
 
     # Re-escalar los keypoints a las dimensiones originales del frame
     frame_h, frame_w = frame_shape
     scale_x, scale_y = frame_w / INPUT_WIDTH, frame_h / INPUT_HEIGHT
     
-    keypoints_rescaled = np.zeros((17, 2))
-    keypoints_rescaled[:, 0] = keypoints_raw[:, 0] * scale_x
-    keypoints_rescaled[:, 1] = keypoints_raw[:, 1] * scale_y
+    keypoints_rescaled = np.zeros((NUM_BODY_KPTS, 2), dtype=np.float32)
+    keypoints_rescaled[:, 0] = body_kpts_raw[:, 0] * scale_x
+    keypoints_rescaled[:, 1] = body_kpts_raw[:, 1] * scale_y
 
     return keypoints_rescaled
 
@@ -56,14 +69,8 @@ def postprocess_output(output, frame_shape):
 def main():
     print("--- Extracción de Puntos Clave Optimizada con ONNX ---")
 
-    # Cargar la sesión de inferencia de ONNX
-    # Cargar la sesión de inferencia de ONNX
     print(f"Cargando modelo ONNX desde: {ONNX_MODEL_PATH}")
-
-    # MODIFICACIÓN: Se especifica CUDA como el único proveedor
     ort_session = ort.InferenceSession(ONNX_MODEL_PATH, providers=['CUDAExecutionProvider'])
-
-    # VERIFICACIÓN: Imprimir el proveedor que se está utilizando
     print(f"✅ Usando el proveedor de ONNX: {ort_session.get_providers()[0]}")
 
     # Iterar sobre todos los videos del conjunto de datos
@@ -93,17 +100,15 @@ def main():
                 ort_inputs = {ort_session.get_inputs()[0].name: input_tensor}
                 ort_outs = ort_session.run(None, ort_inputs)
 
-                # 3. Post-procesar la salida para obtener keypoints
+                # 3. Post-procesar la salida para obtener keypoints (solo cuerpo)
                 keypoints = postprocess_output(ort_outs, frame.shape[:2])
 
                 if keypoints is not None:
-                    # Aquí no normalizamos, guardamos las coordenadas absolutas
-                    # ya que el modelo LSTM puede aprender de ellas.
-                    # Si se quisiera normalizar, se haría aquí.
+                    # Guardamos coordenadas absolutas (solo cuerpo, sin cara)
                     video_keypoints.append(keypoints)
                 else:
-                    # Añadir ceros si no se detecta persona
-                    video_keypoints.append(np.zeros((17, 2)))
+                    # Añadir ceros si no se detecta persona (mismo shape: (12, 2))
+                    video_keypoints.append(np.zeros((NUM_BODY_KPTS, 2), dtype=np.float32))
 
             cap.release()
 
@@ -120,7 +125,7 @@ def main():
             output_npy_path = output_path_without_ext + ".npy"
             np.save(output_npy_path, sequence_data)
             
-            print(f"✅ Puntos clave guardados en: {output_npy_path} con forma {sequence_data.shape}")
+            print(f"✅ Puntos clave (solo cuerpo) guardados en: {output_npy_path} con forma {sequence_data.shape}")
 
     print("\n--- Proceso finalizado ---")
 
