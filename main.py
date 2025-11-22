@@ -21,7 +21,7 @@ DATABASE_PATH = './reference_embeddings.pkl'
 SEQUENCE_LENGTH = 15  # Número de fotogramas para acumular antes de la inferencia. ¡Debe ser manejable!
 REID_THRESHOLD = 10  # Umbral de distancia. ¡Necesitarás ajustarlo!
 
-# Dimensiones de entrada para el modelo ONNX (de YOLOv8)
+# Dimensiones de entrada para el modelo ONNX (de YOLO11)
 INPUT_WIDTH = 640
 INPUT_HEIGHT = 640
 # --- --- ------------------------------------ --- --- ---
@@ -48,7 +48,7 @@ keypoints_buffer = deque(maxlen=SEQUENCE_LENGTH)
 current_label = "Procesando..."
 
 # Iniciar captura de video
-cap = cv2.VideoCapture(".//dataset//train//luis//luis1.mp4")
+cap = cv2.VideoCapture(".//dataset//train//cesar//cesar2.mp4")
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -118,7 +118,6 @@ while True:
             current_label = reference_ids[min_dist_idx]
         else:
             current_label = "Desconocido"
-            
         # Limpiar el búfer para empezar a acumular una nueva secuencia
         keypoints_buffer.clear()
 
