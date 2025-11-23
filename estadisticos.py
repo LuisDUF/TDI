@@ -18,14 +18,14 @@ SIAMESE_MODEL_PATH = './best_siamese_model.pth'
 DATABASE_PATH = './reference_embeddings.pkl'
 
 # Parámetros
-SEQUENCE_LENGTH = 15 
+SEQUENCE_LENGTH = 2
 REID_THRESHOLD = 0.55 # Ajusta esto según tus pruebas anteriores
 INPUT_WIDTH = 640
 INPUT_HEIGHT = 640
 
 # --- --- CONFIGURACIÓN DE LA PRUEBA --- ---
 GROUND_TRUTH_ID = 'Luis'  # ¿Quién es la persona real en el video?
-VIDEO_PATH = ".//dataset//train//Luis//Luis1.mp4"
+VIDEO_PATH = ".//LuisPrueba.mp4"
 # ------------------------------------------
 
 # Configuración de Estilo para Gráficas
