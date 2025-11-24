@@ -11,7 +11,7 @@ ONNX_MODEL_PATH = './yolo11m-pose.onnx'
 INPUT_WIDTH = 640
 INPUT_HEIGHT = 640
 
-NUM_FRAMES = 80  # <<--- Número de fotogramas a extraer
+NUM_FRAMES = 55  # <<--- Número de fotogramas a extraer
 
 BODY_KPT_INDICES = list(range(5, 17))   # 12 keypoints de cuerpo
 NUM_BODY_KPTS = len(BODY_KPT_INDICES)

@@ -12,7 +12,6 @@ from entrenarRedSiamesa import canonicalize_direction, normalize_sequence
 from collections import deque
 
 # Importamos la arquitectura de la red siamesa
-# IMPORTANTE: asumo que en entrenarRedSiamesa ahora también definiste INPUT_DIM (= 12*2)
 from entrenarRedSiamesa import SiameseLSTM, EMBEDDING_DIM, LSTM_HIDDEN_DIM, NUM_LSTM_LAYERS, INPUT_DIM
 
 # --- --- --- CONFIGURACIÓN Y CONSTANTES --- --- ---
@@ -21,8 +20,8 @@ SIAMESE_MODEL_PATH = './best_siamese_model.pth'
 DATABASE_PATH = './reference_embeddings.pkl'
 
 # Parámetros
-SEQUENCE_LENGTH = 60
-REID_THRESHOLD = 20 # Ajusta esto según tus pruebas
+SEQUENCE_LENGTH = 60        # Ventana para las predicciones continuas
+REID_THRESHOLD = 20         # Ajusta esto según tus pruebas
 INPUT_WIDTH = 640
 INPUT_HEIGHT = 640
 
@@ -30,7 +29,7 @@ INPUT_HEIGHT = 640
 BODY_KPT_INDICES = list(range(5, 17))   # 12 puntos
 NUM_BODY_KPTS = len(BODY_KPT_INDICES)
 
-# --- --- CONFIGURACIÓN DE LA PRUEBA --- ---
+# --- --- CONFIGURACIÓN DE LA PRUEBA --- --- ---
 GROUND_TRUTH_ID = 'Luis'  # ¿Quién es la persona real en el video?
 VIDEO_PATH = ".//LuisPrueba.mp4"
 # ------------------------------------------
@@ -93,9 +92,12 @@ ort_session = ort.InferenceSession(
 )
 
 # Variables para el reporte
-history_data = []  # Aquí guardaremos cada predicción para el análisis final
+history_data = []  # Predicciones por ventana (streaming)
 
+# Buffer para ventanas + lista para video completo
 keypoints_buffer = deque(maxlen=SEQUENCE_LENGTH)
+video_keypoints = []   # (frame_idx, kpts_norm) para el embedding global
+
 cap = cv2.VideoCapture(VIDEO_PATH)
 frame_count = 0
 
@@ -134,11 +136,10 @@ while True:
             # Extraer TODOS los 17 keypoints (COCO)
             keypoints_raw = detection[5:].reshape((17, 3))
 
-            # 🔹 NUEVO: quedarnos solo con keypoints de cuerpo (sin cara)
+            # Quedarnos solo con keypoints de cuerpo (sin cara)
             body_kpts_raw = keypoints_raw[BODY_KPT_INDICES]  # (12, 3)
 
-            # 🔹 IMPORTANTE: re-escalar igual que en el script de extracción
-            # Coordenadas de YOLO están en el espacio 640x640 (INPUT_WIDTH/HEIGHT)
+            # Re-escalar igual que en el script de extracción
             frame_h, frame_w = frame.shape[:2]
             scale_x = frame_w / INPUT_WIDTH
             scale_y = frame_h / INPUT_HEIGHT
@@ -149,20 +150,22 @@ while True:
 
             kpts_body_norm = normalize_frame_kpts(kpts_body_rescaled)
 
+            # Guardamos para la ventana
             keypoints_buffer.append(kpts_body_norm)
+
+            # Guardamos para el video completo
+            video_keypoints.append((frame_count, kpts_body_norm))
 
     if not person_detected:
         keypoints_buffer.clear()
         current_label = "No Detectado"
 
-    # --- Inferencia Red Siamesa ---
+    # --- Inferencia Red Siamesa (PREDICCIÓN CONTINUA POR VENTANAS) ---
     if len(keypoints_buffer) == SEQUENCE_LENGTH:
         sequence_np = np.array(keypoints_buffer)   # (T, 12, 2)
         sequence_np = canonicalize_direction(sequence_np)
         sequence_np = normalize_sequence(sequence_np)
         sequence_tensor = torch.from_numpy(sequence_np).float().unsqueeze(0).to(device)
-
-        # -> (1, seq_len, 12, 2)
 
         with torch.no_grad():
             live_embedding = siamese_model(sequence_tensor).cpu().numpy().squeeze()
@@ -171,8 +174,8 @@ while True:
         distances = [braycurtis(live_embedding, ref_emb) for ref_emb in reference_embeddings]
         min_dist_idx = np.argmin(distances)
         min_dist = distances[min_dist_idx]
-        print(reference_ids[min_dist_idx], min_dist)
-        print(reference_ids[np.argmax(distances)], distances[np.argmax(distances)] )
+        print("Ventana:", frame_count, "->", reference_ids[min_dist_idx], min_dist)
+        print("Más lejano:", reference_ids[np.argmax(distances)], distances[np.argmax(distances)])
 
         # Lógica de Clasificación
         predicted_id = reference_ids[min_dist_idx]
@@ -183,11 +186,11 @@ while True:
 
         current_label = final_label
 
-        # --- REGISTRO DE DATOS PARA EL REPORTE ---
+        # REGISTRO DE DATOS PARA EL REPORTE (por ventana)
         is_correct = (final_label == GROUND_TRUTH_ID)
 
         history_data.append({
-            'Frame': frame_count,
+            'Frame': frame_count,   # Usamos el frame actual como referencia de la ventana
             'Distancia': min_dist,
             'Predicción': final_label,
             'Correcto': 'Si' if is_correct else 'No',
@@ -196,7 +199,7 @@ while True:
 
         keypoints_buffer.clear()
 
-    # Visualización en tiempo real (simple)
+    # Visualización en tiempo real
     color = (0, 255, 0) if current_label == GROUND_TRUTH_ID else (0, 0, 255)
     cv2.putText(frame, f"Pred: {current_label}", (20, 50),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
@@ -208,58 +211,96 @@ while True:
 cap.release()
 cv2.destroyAllWindows()
 
-# --- --- --- GENERACIÓN DEL REPORTE GRÁFICO --- --- ---
+# --- --- PREDICCIÓN GLOBAL CON TODO EL VIDEO COMPLETO --- --- ---
 
-if not history_data:
-    print("No se generaron suficientes datos para el reporte.")
+if not video_keypoints:
+    print("No se generaron suficientes datos (no se detectó persona) para el reporte.")
     exit()
 
-# Crear DataFrame
-df = pd.DataFrame(history_data)
+# Construimos la secuencia larga con todos los frames donde hubo detección
+frame_indices_global = [fk[0] for fk in video_keypoints]
+kpts_list_global = [fk[1] for fk in video_keypoints]
 
-# Calcular métricas finales
+sequence_np_global = np.stack(kpts_list_global, axis=0).astype(np.float32)
+sequence_np_global = canonicalize_direction(sequence_np_global)
+sequence_np_global = normalize_sequence(sequence_np_global)
+
+sequence_tensor_global = torch.from_numpy(sequence_np_global).float().unsqueeze(0).to(device)
+
+with torch.no_grad():
+    live_embedding_global = siamese_model(sequence_tensor_global).cpu().numpy().squeeze()
+
+distances_global = [braycurtis(live_embedding_global, ref_emb) for ref_emb in reference_embeddings]
+min_dist_idx_global = np.argmin(distances_global)
+min_dist_global = distances_global[min_dist_idx_global]
+
+predicted_id_global = reference_ids[min_dist_idx_global]
+if min_dist_global < REID_THRESHOLD:
+    final_label_global = predicted_id_global
+else:
+    final_label_global = "Desconocido"
+
+print("\n====== RESULTADO GLOBAL DEL VIDEO ======")
+print("ID más cercano:", predicted_id_global)
+print("Distancia mínima:", min_dist_global)
+print("ID más lejano:", reference_ids[np.argmax(distances_global)],
+      "Distancia máx:", distances_global[np.argmax(distances_global)])
+print("Etiqueta final del video:", final_label_global)
+print("========================================\n")
+
+# --- --- --- GENERACIÓN DEL REPORTE GRÁFICO (VENTANAS) --- --- ---
+
+if not history_data:
+    print("No se generaron suficientes datos de ventanas para el reporte.")
+    exit()
+
+df = pd.DataFrame(history_data)
+df = df.sort_values('Frame')
+
+# Calcular métricas finales (por ventanas)
 total_preds = len(df)
 aciertos = len(df[df['Correcto'] == 'Si'])
 precision = (aciertos / total_preds) * 100 if total_preds > 0 else 0
 
-print(f"\nGenerando gráficas... Precisión calculada: {precision:.2f}%")
+print(f"Generando gráficas... Precisión por ventanas: {precision:.2f}%")
 
-# Configurar el Dashboard (3 gráficas en una imagen)
+# Dashboard
 fig = plt.figure(figsize=(14, 8))
 fig.suptitle(
-    f'Reporte de Validación Re-ID\nGround Truth: {GROUND_TRUTH_ID} | Precisión Global: {precision:.2f}%',
+    f'Reporte Re-ID (Ventanas) | GT: {GROUND_TRUTH_ID}\n'
+    f'Precisión por ventanas: {precision:.2f}% | Predicción global: {final_label_global} (dist={min_dist_global:.2f})',
     fontsize=16
 )
 gs = fig.add_gridspec(2, 2)
 
-# 1. Distancia vs Tiempo
-ax1 = fig.add_subplot(gs[0, :])  # Ocupa todo el ancho superior
+# 1. Distancia vs Tiempo (ventanas)
+ax1 = fig.add_subplot(gs[0, :])
 sns.lineplot(
     data=df, x='Frame', y='Distancia', marker='o',
     hue='Correcto', palette={'Si': 'green', 'No': 'red'}, ax=ax1
 )
 ax1.axhline(REID_THRESHOLD, color='blue', linestyle='--', label=f'Umbral ({REID_THRESHOLD})')
-ax1.set_title('Evolución de la Distancia (braycurtis)')
+ax1.set_title('Evolución de la Distancia (braycurtis) - Ventanas')
 ax1.set_ylabel('Distancia (Menor es mejor)')
 ax1.legend()
 
-# 2. Distribución de Predicciones
+# 2. Distribución de Predicciones (ventanas)
 ax2 = fig.add_subplot(gs[1, 0])
 conteo_preds = df['Predicción'].value_counts().reset_index()
 conteo_preds.columns = ['Identidad', 'Cantidad']
 sns.barplot(data=conteo_preds, x='Identidad', y='Cantidad', palette='viridis', ax=ax2)
-ax2.set_title('Distribución de Identidades Predichas')
+ax2.set_title('Distribución de Identidades Predichas (Ventanas)')
 ax2.set_ylabel('Número de veces detectado')
 
-# 3. Pastel de Aciertos vs Errores
+# 3. Pastel de Aciertos vs Errores (ventanas)
 ax3 = fig.add_subplot(gs[1, 1])
 counts = df['Correcto'].value_counts()
 ax3.pie(counts, labels=counts.index, autopct='%1.1f%%',
         colors=['#66b3ff', '#ff9999'], startangle=90)
-ax3.set_title('Porcentaje de Aciertos')
+ax3.set_title('Porcentaje de Aciertos (Ventanas)')
 
 plt.tight_layout()
-filename = "reporte_validacion_final.png"
+filename = "reporte_validacion_ventanas_y_global.png"
 plt.savefig(filename, dpi=300)
 print(f"✅ Reporte guardado exitosamente como: {filename}")
 plt.show()
