@@ -14,11 +14,11 @@ import numpy as np
 TRAIN_DIR = "./keypoints/train"
 VAL_DIR = "./keypoints/val"
 EMBEDDING_DIM = 128   # Dimensión del vector de características de salida
-LSTM_HIDDEN_DIM = 128 # Dimensión oculta del LSTM
+LSTM_HIDDEN_DIM = 256 # Dimensión oculta del LSTM
 NUM_LSTM_LAYERS = 2   # Número de capas LSTM
 LEARNING_RATE = 0.0001
 BATCH_SIZE = 16
-EPOCHS = 50
+EPOCHS = 100
 
 # IMPORTANTE: ahora usamos solo cuerpo -> 12 keypoints * 2 coords (x,y)
 NUM_BODY_KPTS = 12

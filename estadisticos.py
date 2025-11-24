@@ -21,8 +21,8 @@ SIAMESE_MODEL_PATH = './best_siamese_model.pth'
 DATABASE_PATH = './reference_embeddings.pkl'
 
 # Parámetros
-SEQUENCE_LENGTH = 15
-REID_THRESHOLD = 0.48  # Ajusta esto según tus pruebas
+SEQUENCE_LENGTH = 30
+REID_THRESHOLD = 20 # Ajusta esto según tus pruebas
 INPUT_WIDTH = 640
 INPUT_HEIGHT = 640
 
