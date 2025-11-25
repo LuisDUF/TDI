@@ -21,17 +21,35 @@ DATABASE_PATH = './reference_embeddings.pkl'
 
 # Parámetros
 SEQUENCE_LENGTH = 60        # Ventana para las predicciones continuas
-REID_THRESHOLD = 20         # Ajusta esto según tus pruebas
+REID_THRESHOLD = 0.6        # Ajusta esto según tus pruebas
 INPUT_WIDTH = 640
 INPUT_HEIGHT = 640
+
+current_label = "Recopilando Frames: "
 
 # NUEVO: keypoints de cuerpo (COCO: sin cara: 5–16)
 BODY_KPT_INDICES = list(range(5, 17))   # 12 puntos
 NUM_BODY_KPTS = len(BODY_KPT_INDICES)
 
+# <<< NUEVO: conexiones del esqueleto en el orden COCO de 17 puntos
+# Índices COCO: 
+# 0 nose, 1 l_eye, 2 r_eye, 3 l_ear, 4 r_ear,
+# 5 l_shoulder, 6 r_shoulder, 7 l_elbow, 8 r_elbow,
+# 9 l_wrist, 10 r_wrist, 11 l_hip, 12 r_hip,
+# 13 l_knee, 14 r_knee, 15 l_ankle, 16 r_ankle
+BODY_SKELETON_CONNECTIONS = [
+    (5, 7), (7, 9),         # brazo izquierdo
+    (6, 8), (8, 10),        # brazo derecho
+    (5, 6),                 # hombros
+    (5, 11), (6, 12),       # hombro-cadera
+    (11, 12),               # caderas
+    (11, 13), (13, 15),     # pierna izquierda
+    (12, 14), (14, 16),     # pierna derecha
+]
+
 # --- --- CONFIGURACIÓN DE LA PRUEBA --- --- ---
-GROUND_TRUTH_ID = 'Luis'  # ¿Quién es la persona real en el video?
-VIDEO_PATH = ".//LuisPrueba.mp4"
+GROUND_TRUTH_ID = 'Cesar'  # ¿Quién es la persona real en el video?
+VIDEO_PATH = ".//CesarPrueba.mp4"
 # ------------------------------------------
 
 def normalize_frame_kpts(frame_kpts):
@@ -120,7 +138,14 @@ while True:
     output = ort_outs[0][0].T
 
     person_detected = False
-    current_label = "..."
+    if(frame_count<=60):
+        current_label = "Recopilando frames: "+str(frame_count)
+
+
+
+    # <<< NUEVO: variables para dibujar el esqueleto
+    keypoints_rescaled_full = None
+    keypoints_raw_full = None
 
     if len(output) > 0:
         best_detection_idx = np.argmax(output[:, 4])
@@ -135,14 +160,20 @@ while True:
 
             # Extraer TODOS los 17 keypoints (COCO)
             keypoints_raw = detection[5:].reshape((17, 3))
+            keypoints_raw_full = keypoints_raw  # <<< NUEVO: guardar completo para visibilidad
 
-            # Quedarnos solo con keypoints de cuerpo (sin cara)
-            body_kpts_raw = keypoints_raw[BODY_KPT_INDICES]  # (12, 3)
-
-            # Re-escalar igual que en el script de extracción
+            # Re-escalar keypoints al tamaño original del frame
             frame_h, frame_w = frame.shape[:2]
             scale_x = frame_w / INPUT_WIDTH
             scale_y = frame_h / INPUT_HEIGHT
+
+            # <<< NUEVO: re-escalar los 17 puntos para dibujar esqueleto
+            keypoints_rescaled_full = np.zeros((17, 2), dtype=np.float32)
+            keypoints_rescaled_full[:, 0] = keypoints_raw[:, 0] * scale_x
+            keypoints_rescaled_full[:, 1] = keypoints_raw[:, 1] * scale_y
+
+            # Quedarnos solo con keypoints de cuerpo (sin cara) para la red
+            body_kpts_raw = keypoints_raw[BODY_KPT_INDICES]  # (12, 3)
 
             kpts_body_rescaled = np.zeros((NUM_BODY_KPTS, 2), dtype=np.float32)
             kpts_body_rescaled[:, 0] = body_kpts_raw[:, 0] * scale_x
@@ -199,10 +230,30 @@ while True:
 
         keypoints_buffer.clear()
 
+    # <<< NUEVO: Dibujar esqueleto si tenemos keypoints
+    # <<< NUEVO: Dibujar SOLO keypoints del cuerpo
+    if keypoints_rescaled_full is not None and keypoints_raw_full is not None:
+
+    # Líneas del cuerpo
+        for i, j in BODY_SKELETON_CONNECTIONS:
+            if keypoints_raw_full[i, 2] > 0.2 and keypoints_raw_full[j, 2] > 0.2:
+                x1, y1 = keypoints_rescaled_full[i]
+                x2, y2 = keypoints_rescaled_full[j]
+                cv2.line(frame, (int(x1), int(y1)), (int(x2), int(y2)),
+                        (0, 255, 255), 2)
+
+    # Puntos del cuerpo
+        for idx in BODY_KPT_INDICES:
+            conf = keypoints_raw_full[idx, 2]
+            if conf > 0.2:
+                x, y = keypoints_rescaled_full[idx]
+                cv2.circle(frame, (int(x), int(y)), 4, (0, 255, 0), -1)
+
     # Visualización en tiempo real
     color = (0, 255, 0) if current_label == GROUND_TRUTH_ID else (0, 0, 255)
-    cv2.putText(frame, f"Pred: {current_label}", (20, 50),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+    if(current_label!=""):
+        cv2.putText(frame, f"{current_label}", (20, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
     cv2.imshow('Analisis en Curso', frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -267,8 +318,8 @@ print(f"Generando gráficas... Precisión por ventanas: {precision:.2f}%")
 # Dashboard
 fig = plt.figure(figsize=(14, 8))
 fig.suptitle(
-    f'Reporte Re-ID (Ventanas) | GT: {GROUND_TRUTH_ID}\n'
-    f'Precisión por ventanas: {precision:.2f}% | Predicción global: {final_label_global} (dist={min_dist_global:.2f})',
+    f'Reporte de resultados: {GROUND_TRUTH_ID}\n'
+    f'Precisión: {precision:.2f}%',
     fontsize=16
 )
 gs = fig.add_gridspec(2, 2)
@@ -280,8 +331,8 @@ sns.lineplot(
     hue='Correcto', palette={'Si': 'green', 'No': 'red'}, ax=ax1
 )
 ax1.axhline(REID_THRESHOLD, color='blue', linestyle='--', label=f'Umbral ({REID_THRESHOLD})')
-ax1.set_title('Evolución de la Distancia (braycurtis) - Ventanas')
-ax1.set_ylabel('Distancia (Menor es mejor)')
+ax1.set_title('Evolución de la Distancia')
+ax1.set_ylabel('Distancia')
 ax1.legend()
 
 # 2. Distribución de Predicciones (ventanas)
@@ -289,7 +340,7 @@ ax2 = fig.add_subplot(gs[1, 0])
 conteo_preds = df['Predicción'].value_counts().reset_index()
 conteo_preds.columns = ['Identidad', 'Cantidad']
 sns.barplot(data=conteo_preds, x='Identidad', y='Cantidad', palette='viridis', ax=ax2)
-ax2.set_title('Distribución de Identidades Predichas (Ventanas)')
+ax2.set_title('Distribución de Identidades Predichas')
 ax2.set_ylabel('Número de veces detectado')
 
 # 3. Pastel de Aciertos vs Errores (ventanas)
@@ -297,7 +348,7 @@ ax3 = fig.add_subplot(gs[1, 1])
 counts = df['Correcto'].value_counts()
 ax3.pie(counts, labels=counts.index, autopct='%1.1f%%',
         colors=['#66b3ff', '#ff9999'], startangle=90)
-ax3.set_title('Porcentaje de Aciertos (Ventanas)')
+ax3.set_title('Porcentaje de Aciertos')
 
 plt.tight_layout()
 filename = "reporte_validacion_ventanas_y_global.png"
